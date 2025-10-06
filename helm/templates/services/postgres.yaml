@@ -1,0 +1,95 @@
+{{- $ns  := (default "cinemaabyss" .Values.global.namespace) -}}
+{{- $db  := (default (dict) .Values.database) -}}
+{{- $img := (default (dict) $db.image) -}}
+{{- $res := (default (dict) $db.resources) -}}
+{{- $per := (default (dict) $db.persistence) -}}
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: {{ $ns }}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ default "postgres" $img.repository }}:{{ default "14" $img.tag }}
+          imagePullPolicy: {{ default "IfNotPresent" $img.pullPolicy }}
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: cinemaabyss-config
+                  key: DB_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cinemaabyss-secrets
+                  key: DB_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: cinemaabyss-config
+                  key: DB_NAME
+          {{- if $res }}
+          resources:
+{{ toYaml $res | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: postgres-init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command: ["pg_isready","-U","postgres"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready","-U","postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        - name: postgres-init-scripts
+          configMap:
+            name: postgres-init-scripts
+        {{- if not ($per.enabled | default true) }}
+        - name: postgres-data
+          emptyDir: {}
+        {{- end }}
+  {{- if $per.enabled | default true }}
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: [ "{{ default "ReadWriteOnce" $per.accessMode }}" ]
+        resources:
+          requests:
+            storage: {{ default "10Gi" $per.size }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: {{ $ns }}
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: {{ default 5432 $db.port }}
+      targetPort: 5432
+  type: ClusterIP
+

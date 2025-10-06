@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cinemaabyss-config
+  namespace: {{ default "cinemaabyss" .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ include "cinemaabyss.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  # Database
+  DB_HOST: {{ ( index ( default (dict) ( index .Values "database" ) ) "host" ) | default "postgres" | quote }}
+  DB_PORT: {{ ( index ( default (dict) ( index .Values "database" ) ) "port" ) | default 5432 | quote }}
+  DB_NAME: {{ ( index ( default (dict) ( index .Values "database" ) ) "name" ) | default "cinemaabyss" | quote }}
+  DB_USER: {{ ( index ( default (dict) ( index .Values "database" ) ) "user" ) | default "postgres" | quote }}
+
+  # Service URLs
+  MONOLITH_URL: {{ printf "http://monolith:%v" ( ( index ( default (dict) ( index ( default (dict) ( index .Values "monolith" ) ) "service" ) ) "port" ) | default 8080 ) | quote }}
+  MOVIES_SERVICE_URL: {{ printf "http://movies-service:%v" ( ( index ( default (dict) ( index ( default (dict) ( index .Values "moviesService" ) ) "service" ) ) "port" ) | default 8081 ) | quote }}
+
+  # Strangler Fig
+  GRADUAL_MIGRATION: {{ ( index ( default (dict) ( index .Values "config" ) ) "gradualMigration" ) | default "true" | quote }}
+  MOVIES_MIGRATION_PERCENT: {{ ( index ( default (dict) ( index .Values "config" ) ) "moviesMigrationPercent" ) | default "100" | quote }}
+

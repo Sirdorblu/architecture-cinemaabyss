@@ -2,8 +2,18 @@ name: build-and-deploy
 
 on:
   push:
-    branches: [cinema]
+    branches: [ cinema ]
   workflow_dispatch:
+    inputs:
+      deploy_mode:
+        description: 'Как деплоить?'
+        type: choice
+        options: [manifests, helm, skip]
+        default: manifests
+      confirm_deploy:
+        description: 'Подтвердить деплой'
+        type: boolean
+        default: true
 
 env:
   REGISTRY: ghcr.io
@@ -62,9 +72,40 @@ jobs:
             ghcr.io/sirdorblu/proxy-service:latest
             ghcr.io/sirdorblu/proxy-service:${{ github.sha }}
 
-  deploy:
+  choose:
     needs: build
     runs-on: self-hosted
+    # repo variable DEFAULT_DEPLOY_MODE (manifests|helm|skip) задаёт дефолт для пушей
+    env:
+      DEFAULT_DEPLOY_MODE: ${{ vars.DEFAULT_DEPLOY_MODE }}
+    outputs:
+      mode: ${{ steps.pick.outputs.mode }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            mode="${{ inputs.deploy_mode }}"
+            confirm="${{ inputs.confirm_deploy }}"
+          else
+            mode="${DEFAULT_DEPLOY_MODE:-manifests}"
+            confirm="true"
+          fi
+
+          if [[ "${confirm}" != "true" ]]; then
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "mode=${mode}" >> "$GITHUB_OUTPUT"
+          echo "Deploy mode: ${mode}"
+
+  deploy-manifests:
+    needs: [build, choose]
+    if: needs.choose.outputs.mode == 'manifests'
+    runs-on: self-hosted
+    environment:
+      name: prod 
     steps:
       - uses: actions/checkout@v4
 
@@ -77,7 +118,7 @@ jobs:
             --docker-server=ghcr.io \
             --docker-username="${{ secrets.GHCR_USERNAME }}" \
             --docker-password="${{ secrets.GHCR_TOKEN }}" \
-            --docker-email="batersit@inbox.ru" \
+            --docker-email="ci@example.local" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Apply manifests
@@ -87,7 +128,6 @@ jobs:
         env:
           SHA: ${{ github.sha }}
         run: |
-          kubectl -n cinemaabyss get deploy
           kubectl -n cinemaabyss set image deployment/monolith        monolith=ghcr.io/sirdorblu/monolith:${SHA}
           kubectl -n cinemaabyss set image deployment/movies-service  movies-service=ghcr.io/sirdorblu/movies-service:${SHA}
           kubectl -n cinemaabyss set image deployment/events-service  events-service=ghcr.io/sirdorblu/events-service:${SHA}
@@ -96,4 +136,28 @@ jobs:
           kubectl -n cinemaabyss rollout status deployment/movies-service
           kubectl -n cinemaabyss rollout status deployment/events-service
           kubectl -n cinemaabyss rollout status deployment/proxy-service
+
+  deploy-helm:
+    needs: [build, choose]
+    if: needs.choose.outputs.mode == 'helm'
+    runs-on: self-hosted
+    environment:
+      name: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure namespace + GHCR secret
+        run: |
+          kubectl get ns cinemaabyss >/dev/null 2>&1 || kubectl create ns cinemaabyss
+          kubectl -n cinemaabyss create secret docker-registry ghcr-creds \
+            --docker-server=ghcr.io \
+            --docker-username="${{ secrets.GHCR_USERNAME }}" \
+            --docker-password="${{ secrets.GHCR_TOKEN }}" \
+            --docker-email="ci@example.local" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Helm upgrade/install
+        run: |
+          helm upgrade --install cinemaabyss ./helm -n cinemaabyss --create-namespace \
+            --set imagePullSecretName=ghcr-creds
 
