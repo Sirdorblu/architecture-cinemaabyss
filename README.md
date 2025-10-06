@@ -132,3 +132,10 @@ spec:
       imagePullSecrets:
         - name: ghcr-creds
 ```
+Then you can use helm like 
+
+```bash
+helm upgrade --install cinemaabyss ./helm -n cinemaabyss
+```
+
+Or use GitHub action by pushing changes or start it manualy and choose a method - helm or manifest
