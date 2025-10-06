@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proxy-service
+  namespace: cinemaabyss
+  labels: { app: proxy-service }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: proxy-service } }
+  template:
+    metadata: { labels: { app: proxy-service } }
+    spec:
+      containers:
+        - name: proxy-service
+          image: ghcr.io/sirdorblu/proxy-service:latest
+          imagePullPolicy: Always
+          ports: [{ containerPort: 8000 }]
+          env:
+            - { name: PORT, value: "8000" }
+            - { name: MONOLITH_URL, value: "http://monolith:8080" }
+            - { name: MOVIES_SERVICE_URL, value: "http://movies-service:8081" }
+            - { name: EVENTS_SERVICE_URL, value: "http://events-service:8082" }
+          readinessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 5, periodSeconds: 10 }
+      imagePullSecrets:
+        - name: ghcr-creds
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: proxy-service
+  namespace: cinemaabyss
+spec:
+  selector: { app: proxy-service }
+  type: NodePort
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      nodePort: 30080
+
