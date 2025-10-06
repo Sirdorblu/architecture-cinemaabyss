@@ -1,0 +1,137 @@
+{{- $ns := (default .Release.Namespace .Values.global.namespace) -}}
+{{- $kafka := (default dict .Values.kafka) -}}
+{{- $zk := (default dict .Values.zookeeper) -}}
+{{- if (default false (get $kafka "enabled")) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: {{ $ns }}
+  labels: { app: zookeeper }
+spec:
+  ports:
+    - { port: 2181, name: client }
+    - { port: 2888, name: server }
+    - { port: 3888, name: leader-election }
+  selector: { app: zookeeper }
+---
+{{- $zkPer := (default dict (get $zk "persistence")) -}}
+{{- $zkPerEnabled := (default false (get $zkPer "enabled")) -}}
+{{- if $zkPerEnabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zookeeper-data
+  namespace: {{ $ns }}
+spec:
+  accessModes: [ {{ default "ReadWriteOnce" (get $zkPer "accessMode") }} ]
+  resources:
+    requests:
+      storage: {{ default "1Gi" (get $zkPer "size") }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: {{ $ns }}
+spec:
+  serviceName: zookeeper
+  replicas: {{ default 1 (get $zk "replicas") }}
+  selector: { matchLabels: { app: zookeeper } }
+  template:
+    metadata: { labels: { app: zookeeper } }
+    spec:
+      containers:
+        - name: zookeeper
+          image: {{ default "wurstmeister/zookeeper" (get (default dict (get $zk "image")) "repository") }}:{{ default "latest" (get (default dict (get $zk "image")) "tag") }}
+          imagePullPolicy: {{ default "IfNotPresent" (get (default dict (get $zk "image")) "pullPolicy") }}
+          ports:
+            - { containerPort: 2181, name: client }
+            - { containerPort: 2888, name: server }
+            - { containerPort: 3888, name: leader-election }
+          resources:
+{{ toYaml (default dict (get $zk "resources")) | nindent 12 }}
+          env:
+            - { name: ZOOKEEPER_CLIENT_PORT, value: "2181" }
+            - { name: ZOOKEEPER_TICK_TIME, value: "2000" }
+          volumeMounts:
+            - { name: zookeeper-data, mountPath: /var/lib/zookeeper/data }
+      volumes:
+        {{- if $zkPerEnabled }}
+        - name: zookeeper-data
+          persistentVolumeClaim: { claimName: zookeeper-data }
+        {{- else }}
+        - name: zookeeper-data
+          emptyDir: {}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: {{ $ns }}
+  labels: { app: kafka }
+spec:
+  ports:
+    - { port: 9092, name: kafka }
+  selector: { app: kafka }
+---
+{{- $kPer := (default dict (get $kafka "persistence")) -}}
+{{- $kPerEnabled := (default false (get $kPer "enabled")) -}}
+{{- if $kPerEnabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kafka-data
+  namespace: {{ $ns }}
+spec:
+  accessModes: [ {{ default "ReadWriteOnce" (get $kPer "accessMode") }} ]
+  resources:
+    requests:
+      storage: {{ default "5Gi" (get $kPer "size") }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: {{ $ns }}
+spec:
+  serviceName: kafka
+  replicas: {{ default 1 (get $kafka "replicas") }}
+  selector: { matchLabels: { app: kafka } }
+  template:
+    metadata: { labels: { app: kafka } }
+    spec:
+      containers:
+        - name: kafka
+          image: {{ default "wurstmeister/kafka" (get (default dict (get $kafka "image")) "repository") }}:{{ default "2.13-2.7.0" (get (default dict (get $kafka "image")) "tag") }}
+          imagePullPolicy: {{ default "IfNotPresent" (get (default dict (get $kafka "image")) "pullPolicy") }}
+          ports:
+            - { containerPort: 9092, name: kafka }
+          resources:
+{{ toYaml (default dict (get $kafka "resources")) | nindent 12 }}
+          env:
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka:9092" }
+            - { name: KAFKA_LISTENERS,            value: "PLAINTEXT://0.0.0.0:9092" }
+            - { name: KAFKA_PORT,                 value: "9092" }
+            - { name: KAFKA_ZOOKEEPER_CONNECT,    value: "zookeeper:2181" }
+            - name: KAFKA_CREATE_TOPICS
+              value: "{{- range $i, $t := (default (list) (get $kafka "topics")) -}}{{- if $i }},{{ end -}}{{- $t.name -}}:{{ default 1 $t.partitions }}:{{ default 1 $t.replicationFactor }}{{- end -}}"
+            - { name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "true" }
+            - { name: KAFKA_BROKER_ID, value: "1" }
+            - { name: KAFKA_LOG_DIRS,  value: "/kafka/kafka-logs" }
+          volumeMounts:
+            - { name: kafka-data, mountPath: /kafka }
+      volumes:
+        {{- if $kPerEnabled }}
+        - name: kafka-data
+          persistentVolumeClaim: { claimName: kafka-data }
+        {{- else }}
+        - name: kafka-data
+          emptyDir: {}
+        {{- end }}
+{{- end }}
+
