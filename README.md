@@ -1,9 +1,3 @@
-<<<<<<< HEAD
-# architecture-cinemaabyss
-# architecture-cinemaabyss
-# architecture-cinemaabyss
-# architecture-cinemaabyss
-=======
 # CinemaAbyss — services with Kafka, K8s, Ingress, and GHCR CI/CD
 
 
@@ -145,4 +139,3 @@ helm upgrade --install cinemaabyss ./helm -n cinemaabyss
 ```
 
 Or use GitHub action by pushing changes or start it manualy and choose a method - helm or manifest
->>>>>>> origin/cinema
